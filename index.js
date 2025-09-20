@@ -12,7 +12,7 @@ import { logInfo, logError } from "./utils/logger.js";
 const app = express();
 app.use(express.json());
 
-/**
+/*
  * Conecta ao banco do painel (global.sql)
  */
 async function connectPanelDB() {
