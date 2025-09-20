@@ -26,14 +26,16 @@ async function connectPanelDB() {
     connectTimeout: 60000,
   });
 }
-
 /**
  * Orquestra a sincronização
  */
 async function runSync() {
   const panelConn = await connectPanelDB();
+  logInfo("✅ Conexão com painel global estabelecida.");
+
   try {
     const casinos = await getActiveCasinos(panelConn);
+    logInfo(`🎲 Cassinos ativos carregados do painel: ${casinos.length}`);
 
     for (const casino of casinos) {
       logInfo(`[${casino.name}] Iniciando sync...`);
@@ -43,6 +45,7 @@ async function runSync() {
         let casinoConn;
         try {
           // conectar no banco do cassino
+          logInfo(`[${casino.name}] Conectando ao banco do cassino...`);
           casinoConn = await mysql.createConnection({
             host: casino.db_host,
             port: casino.db_port || 3306,
@@ -51,6 +54,7 @@ async function runSync() {
             database: casino.db_name,
             connectTimeout: 60000,
           });
+          logInfo(`[${casino.name}] Conexão com banco do cassino estabelecida.`);
 
           // buscar depósitos recentes + usuários
           const [deposits] = await casinoConn.execute(`
@@ -68,16 +72,29 @@ async function runSync() {
             WHERE d.created_at > NOW() - INTERVAL 30 SECOND
           `);
 
-          // rodar sync
-          await syncPlayers(casino, deposits, panelConn);
-          await syncDeposits(casino, deposits, panelConn);
-          await syncCommissions(casino, panelConn);
+          logInfo(`[${casino.name}] Depósitos encontrados: ${deposits.length}`);
+          if (deposits.length > 0) {
+            logInfo(`[${casino.name}] Exemplo depósito: ${JSON.stringify(deposits[0])}`);
+          }
 
-          logInfo(`[${casino.name}] Sync concluída com sucesso.`);
+          // rodar sync
+          logInfo(`[${casino.name}] Rodando syncPlayers...`);
+          await syncPlayers(casino, deposits, panelConn);
+          logInfo(`[${casino.name}] syncPlayers concluído.`);
+
+          logInfo(`[${casino.name}] Rodando syncDeposits...`);
+          await syncDeposits(casino, deposits, panelConn);
+          logInfo(`[${casino.name}] syncDeposits concluído.`);
+
+          logInfo(`[${casino.name}] Rodando syncCommissions...`);
+          await syncCommissions(casino, panelConn);
+          logInfo(`[${casino.name}] syncCommissions concluído.`);
+
+          logInfo(`[${casino.name}] ✅ Sync concluída com sucesso.`);
           await casinoConn.end();
           break;
         } catch (err) {
-          logError(`[${casino.name}] Erro na sync`, err);
+          logError(`[${casino.name}] ❌ Erro na sync`, err);
           retries--;
           if (retries === 0) throw err;
           await new Promise(r => setTimeout(r, 5000));
@@ -87,8 +104,9 @@ async function runSync() {
       }
     }
   } catch (err) {
-    logError("Falha no runSync", err);
+    logError("❌ Falha no runSync", err);
   } finally {
+    logInfo("🔌 Encerrando conexão com painel global.");
     await panelConn.end();
   }
 }
