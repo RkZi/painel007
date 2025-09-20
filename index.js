@@ -2,7 +2,7 @@ import express from "express";
 import mysql from "mysql2/promise";
 import { syncPlayers } from "./services/syncPlayers.js";
 import { syncDeposits } from "./services/syncDeposits.js";
-import { syncCommissions } from "./services/syncComms.js";
+import { syncCommissions } from "./services/syncComns.js";
 import { getActiveCasinos } from "./services/casinos.js";
 import { logInfo, logError } from "./utils/logger.js";
 
