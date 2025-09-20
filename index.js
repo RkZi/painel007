@@ -1,3 +1,6 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import express from "express";
 import mysql from "mysql2/promise";
 import { syncPlayers } from "./services/syncPlayers.js";
