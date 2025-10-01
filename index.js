@@ -8,9 +8,20 @@ import { syncDeposits } from "./services/syncDeposits.js";
 import { syncComns } from "./services/syncComns.js";
 import { getActiveCasinos } from "./services/casinos.js";
 import { logInfo, logError } from "./utils/logger.js";
+import payoutWorker from "./workers/payoutWorker.js";
+import paymentWorker from "./workers/paymentWorker.js";
+import affiliateWorker from "./workers/affiliateWorker.js";
+import auditWorker from "./workers/auditWorker.js";
+import "./workers/walletWorker.js";
 
 const app = express();
 app.use(express.json());
+
+//Registrar o worker
+app.use(payoutWorker);
+app.use(paymentWorker);
+app.use(affiliateWorker);
+app.use(auditWorker);
 
 // Conexão com painel
 async function connectPanelDB() {
