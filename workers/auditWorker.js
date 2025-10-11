@@ -227,6 +227,67 @@ async function fixDivergentCommissions(conn) {
   return updated;
 }
 
+async function verifyPendingCommissions(conn) {
+  // Busca comissões pendentes e dados do cassino
+  const [pending] = await conn.execute(`
+    SELECT c.id AS commission_id, c.deposit_id, c.casino_id, c.casino_deposit_id, c.player_id,
+           ca.name AS casino_name, ca.db_host, ca.db_port, ca.db_user, ca.db_password, ca.db_name
+    FROM commissions c
+    JOIN casinos ca ON ca.id = c.casino_id
+    WHERE c.status = 'pending'
+  `);
+
+  if (pending.length === 0) {
+    logInfo("[AUDIT] Nenhuma comissão pendente para verificar.");
+    return 0;
+  }
+
+  let confirmed = 0;
+
+  for (const c of pending) {
+    let casinoConn;
+    try {
+      casinoConn = await mysql.createConnection({
+        host: c.db_host,
+        port: c.db_port || 3306,
+        user: c.db_user,
+        password: c.db_password,
+        database: c.db_name,
+        connectTimeout: 60000,
+      });
+
+      // busca na tabela transactions o depósito correspondente
+      const [tx] = await casinoConn.execute(
+        `SELECT id, status FROM transactions WHERE id = ? OR user_id = ? LIMIT 1`,
+        [c.casino_deposit_id, c.player_id]
+      );
+
+      if (tx.length && tx[0].status === 1) {
+        await conn.execute(
+          `UPDATE commissions 
+             SET status = 'available',
+                 confirmed_at = NOW(),
+                 notes = 'Transaction verified (status=1) via auditWorker'
+           WHERE id = ?`,
+          [c.commission_id]
+        );
+        confirmed++;
+        logInfo(`[AUDIT] Comissão ${c.commission_id} confirmada (cassino ${c.casino_name})`);
+        await logAudit(conn, "AUDIT_COMMISSION_CONFIRMED", { commission_id: c.commission_id, casino: c.casino_name });
+      } else {
+        logInfo(`[AUDIT] Comissão ${c.commission_id} ainda pendente (sem transaction status=1)`);
+      }
+
+      await casinoConn.end();
+    } catch (err) {
+      logError(`[AUDIT] Erro ao verificar comissão ${c.commission_id}`, err);
+    }
+  }
+
+  if (confirmed > 0) logInfo(`[AUDIT] Comissões confirmadas: ${confirmed}`);
+  return confirmed;
+}
+
 async function refreshWalletBalances(conn) {
   // total_earned = SUM(commissions WHERE status='available')
   // total_withdrawn = SUM(payouts WHERE status='approved')  (conforme orientação)
@@ -282,6 +343,7 @@ async function runAuditOnce() {
     normalizedFirst: 0,
     commissionsCreated: 0,
     commissionsAdjusted: 0,
+    verifiedPending: 0,
     walletUpserts: 0,
     walletNegatives: 0,
   };
@@ -293,6 +355,7 @@ async function runAuditOnce() {
     summary.normalizedFirst = await normalizeFirstDepositFlag(conn);
     summary.commissionsCreated = await createMissingCommissions(conn);
     summary.commissionsAdjusted = await fixDivergentCommissions(conn);
+    summary.verifiedPending = await verifyPendingCommissions(conn);
     const wallet = await refreshWalletBalances(conn);
     summary.walletUpserts = wallet.upserts;
     summary.walletNegatives = wallet.negatives;
@@ -324,7 +387,7 @@ router.get("/worker/audit/health", async (_req, res) => {
 // ============================
 // Agendamento automático
 // ============================
-const intervalMs = Number(process.env.AUDIT_INTERVAL_MS || 60000);
+const intervalMs = Number(process.env.AUDIT_INTERVAL_MS || 5000);
 setInterval(() => {
   runAuditOnce();
 }, intervalMs);
