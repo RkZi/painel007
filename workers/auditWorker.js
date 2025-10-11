@@ -263,7 +263,7 @@ async function verifyPendingCommissions(conn) {
         [c.casino_deposit_id, c.player_id]
       );
 
-      if (tx.length && tx[0].status === 1) {
+      if (tx.length && Number(tx[0].status) === 1) {
         await conn.execute(
           `UPDATE commissions 
              SET status = 'available',
