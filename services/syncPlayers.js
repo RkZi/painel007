@@ -24,6 +24,7 @@ export async function syncPlayers(casino, panelConn) {
     const [users] = await casinoConn.execute(`
       SELECT id, name, email, inviter, inviter_code
       FROM users
+      WHERE role_id = 3 AND (is_demo_agent = 0 OR is_demo_agent IS NULL)
     `);
     logInfo(`[${casino.name}] [syncPlayers] Total de usuários encontrados: ${users.length}`);
 
