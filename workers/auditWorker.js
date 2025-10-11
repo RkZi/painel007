@@ -230,12 +230,13 @@ async function fixDivergentCommissions(conn) {
 async function verifyPendingCommissions(conn) {
   // Busca comissões pendentes e dados do cassino
   const [pending] = await conn.execute(`
-    SELECT c.id AS commission_id, c.deposit_id, c.casino_id, c.casino_deposit_id, c.player_id,
-           ca.name AS casino_name, ca.db_host, ca.db_port, ca.db_user, ca.db_password, ca.db_name
-    FROM commissions c
-    JOIN casinos ca ON ca.id = c.casino_id
-    WHERE c.status = 'pending'
-  `);
+  SELECT c.id AS commission_id, c.deposit_id, c.casino_id, c.casino_deposit_id, d.player_id,
+         ca.name AS casino_name, ca.db_host, ca.db_port, ca.db_user, ca.db_password, ca.db_name
+  FROM commissions c
+  JOIN deposits_sync d ON d.id = c.deposit_id
+  JOIN casinos ca ON ca.id = c.casino_id
+  WHERE c.status = 'pending'
+`);
 
   if (pending.length === 0) {
     logInfo("[AUDIT] Nenhuma comissão pendente para verificar.");
