@@ -230,13 +230,14 @@ async function fixDivergentCommissions(conn) {
 async function verifyPendingCommissions(conn) {
   // Busca comissões pendentes e dados do cassino
   const [pending] = await conn.execute(`
-  SELECT c.id AS commission_id, c.deposit_id, c.casino_id, c.casino_deposit_id, d.player_id,
-         ca.name AS casino_name, ca.db_host, ca.db_port, ca.db_user, ca.db_password, ca.db_name
-  FROM commissions c
-  JOIN deposits_sync d ON d.id = c.deposit_id
-  JOIN casinos ca ON ca.id = c.casino_id
-  WHERE c.status = 'pending'
-`);
+    SELECT c.id AS commission_id, c.deposit_id, c.casino_id, c.casino_deposit_id,
+           d.player_id,
+           ca.name AS casino_name, ca.db_host, ca.db_port, ca.db_user, ca.db_password, ca.db_name
+    FROM commissions c
+    JOIN deposits_sync d ON d.id = c.deposit_id
+    JOIN casinos ca ON ca.id = c.casino_id
+    WHERE c.status = 'pending'
+  `);
 
   if (pending.length === 0) {
     logInfo("[AUDIT] Nenhuma comissão pendente para verificar.");
@@ -257,15 +258,28 @@ async function verifyPendingCommissions(conn) {
         connectTimeout: 60000,
       });
 
-      // busca na tabela transactions o depósito correspondente
-      const [tx] = await casinoConn.execute(
-        `SELECT id, status FROM transactions WHERE id = ? OR user_id = ? LIMIT 1`,
-        [c.casino_deposit_id, c.player_id]
+      // 1️⃣ Busca o payment_id na tabela deposits do cassino
+      const [depositRow] = await casinoConn.execute(
+        `SELECT payment_id FROM deposits WHERE id = ? LIMIT 1`,
+        [c.casino_deposit_id]
       );
 
-      if (tx.length && Number(tx[0].status) === 1) {
+      if (!depositRow.length) {
+        logInfo(`[AUDIT] Nenhum depósito encontrado no cassino ${c.casino_name} para casino_deposit_id ${c.casino_deposit_id}`);
+        continue;
+      }
+
+      const paymentId = depositRow[0].payment_id;
+
+      // 2️⃣ Busca o status na tabela transactions
+      const [txRow] = await casinoConn.execute(
+        `SELECT status FROM transactions WHERE payment_id = ? LIMIT 1`,
+        [paymentId]
+      );
+
+      if (txRow.length && Number(txRow[0].status) === 1) {
         await conn.execute(
-          `UPDATE commissions 
+          `UPDATE commissions
              SET status = 'available',
                  confirmed_at = NOW(),
                  notes = 'Transaction verified (status=1) via auditWorker'
@@ -276,7 +290,7 @@ async function verifyPendingCommissions(conn) {
         logInfo(`[AUDIT] Comissão ${c.commission_id} confirmada (cassino ${c.casino_name})`);
         await logAudit(conn, "AUDIT_COMMISSION_CONFIRMED", { commission_id: c.commission_id, casino: c.casino_name });
       } else {
-        logInfo(`[AUDIT] Comissão ${c.commission_id} ainda pendente (sem transaction status=1)`);
+        logInfo(`[AUDIT] Comissão ${c.commission_id} ainda pendente (transaction status != 1)`);
       }
 
       await casinoConn.end();
