@@ -23,21 +23,21 @@ async function connectPanelDB() {
 
 /**
  * Worker de pagamento (acionado quando o admin aprova um payout)
- * Espera body: { payout: { id, influencer_id, total_amount, pix_key, pix_type, cpf_receiver, ... } }
+ * Espera body: { payout: { id, affiliate_id, total_amount, pix_key, pix_type, cpf_receiver, ... } }
  */
 router.post("/worker/payment-process", async (req, res) => {
   const { payout } = req.body;
 
-  if (!payout?.influencer_id) {
+  if (!payout?.affiliate_id) {
     return res.status(400).json({
       status: "error",
-      message: "Payload inválido: payout/influencer_id ausente",
+      message: "Payload inválido: payout/affiliate_id ausente",
     });
   }
 
   const {
     id: payoutId,
-    influencer_id,
+    affiliate_id,
     total_amount,
     pix_key,
     pix_type,
@@ -46,30 +46,30 @@ router.post("/worker/payment-process", async (req, res) => {
 
   let conn;
   try {
-    logInfo("[PAYMENT] ▶️ Iniciando processamento do payout", { payoutId, influencer_id });
+    logInfo("[PAYMENT] ▶️ Iniciando processamento do payout", { payoutId, affiliate_id });
 
     conn = await connectPanelDB();
 
-    // 1) Buscar dados do influencer
-    logInfo("[PAYMENT] 🔎 Buscando influencer no banco", { influencer_id });
+    // 1) Buscar dados do affiliate
+    logInfo("[PAYMENT] 🔎 Buscando affiliate no banco", { affiliate_id });
     const [infRows] = await conn.execute(
       `SELECT id, name, email, phone, document, hotpayments_customer_id
-         FROM influencers
+         FROM affiliates
         WHERE id = ?`,
-      [influencer_id]
+      [affiliate_id]
     );
     if (!infRows.length) {
-      logError("[PAYMENT] ❌ Influencer não encontrado", { influencer_id });
-      return res.status(404).json({ status: "error", message: "Influencer não encontrado" });
+      logError("[PAYMENT] ❌ Affiliate não encontrado", { affiliate_id });
+      return res.status(404).json({ status: "error", message: "Affiliate não encontrado" });
     }
-    const influencer = infRows[0];
+    const affiliate = infRows[0];
 
     // 2) Garantir customer na HotPayments
-    let customerUuid = influencer.hotpayments_customer_id;
+    let customerUuid = affiliate.hotpayments_customer_id;
     if (!customerUuid) {
       logInfo("[PAYMENT] 🧾 Criando customer na HotPayments", {
-        influencer_id,
-        email: influencer.email,
+        affiliate_id,
+        email: affiliate.email,
         cpf_receiver,
       });
 
@@ -80,9 +80,9 @@ router.post("/worker/payment-process", async (req, res) => {
           Authorization: `Bearer ${process.env.HOTPAYMENTS_API_KEY}`,
         },
         body: JSON.stringify({
-          name: influencer.name,
-          email: influencer.email,
-          phone_number: influencer.phone,  // precisa ser só números conforme doc
+          name: affiliate.name,
+          email: affiliate.email,
+          phone_number: affiliate.phone,  // precisa ser só números conforme doc
           document: cpf_receiver,          // CPF do recebedor vindo do payout
         }),
       });
@@ -107,17 +107,17 @@ router.post("/worker/payment-process", async (req, res) => {
 
       // Persistir no banco
       await conn.execute(
-        `UPDATE influencers
+        `UPDATE affiliates
             SET hotpayments_customer_id = ?
           WHERE id = ?`,
-        [customerUuid, influencer_id]
+        [customerUuid, affiliate_id]
       );
-      logInfo("[PAYMENT] 💾 Customer UUID salvo para influencer", {
-        influencer_id,
+      logInfo("[PAYMENT] 💾 Customer UUID salvo para affiliate", {
+        affiliate_id,
         customerUuid,
       });
     } else {
-      logInfo("[PAYMENT] ✅ Influencer já possui customer HotPayments", { customerUuid });
+      logInfo("[PAYMENT] ✅ Affiliate já possui customer HotPayments", { customerUuid });
     }
 
     // 3) Marcar payout como em processamento (processing)
@@ -149,7 +149,7 @@ router.post("/worker/payment-process", async (req, res) => {
         amount: Number(total_amount),
         pix_key: pix_key,
         customer_id: customerUuid,
-        description: `Payout ${payoutId} para influencer ${influencer_id}`,
+        description: `Payout ${payoutId} para affiliate ${affiliate_id}`,
       }),
     });
 

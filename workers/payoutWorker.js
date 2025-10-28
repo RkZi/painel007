@@ -32,25 +32,25 @@ router.post("/worker/payout-request", async (req, res) => {
   try {
     logInfo("[PAYOUT] Recebido payload", payload);
 
-    const { influencer, withdrawal } = payload;
+    const { affiliate, withdrawal } = payload;
 
     // 1) Conectar no banco global
     const conn = await connectPanelDB();
 
-    // 2) Calcular saldo disponível do influencer (somente comissões com status 'available')
+    // 2) Calcular saldo disponível do affiliate (somente comissões com status 'available')
     const [rows] = await conn.execute(
       `SELECT COALESCE(SUM(commission_amount), 0) AS available_balance
        FROM commissions
-       WHERE influencer_id = ? AND status = 'available'`,
-      [influencer.id]
+       WHERE affiliate_id = ? AND status = 'available'`,
+      [affiliate.id]
     );
 
     const availableBalance = rows[0].available_balance;
-    logInfo(`[PAYOUT] Saldo disponível para ${influencer.id}: ${availableBalance}`);
+    logInfo(`[PAYOUT] Saldo disponível para ${affiliate.id}: ${availableBalance}`);
 
     // 3) Validar saldo
     if (withdrawal.amount > availableBalance) {
-      logError("[PAYOUT] Saldo insuficiente para influencer", influencer.id);
+      logError("[PAYOUT] Saldo insuficiente para affiliate", affiliate.id);
       await conn.end();
       return res.status(400).json({
         status: "error",
@@ -64,11 +64,11 @@ router.post("/worker/payout-request", async (req, res) => {
 
     await conn.execute(
       `INSERT INTO payouts 
-       (id, influencer_id, total_amount, method, pix_key, pix_type, cpf_receiver, rejection_reason, processed_at, processed_by, notes, reference, status, created_at, completed_at, casino_id)
+       (id, affiliate_id, total_amount, method, pix_key, pix_type, cpf_receiver, rejection_reason, processed_at, processed_by, notes, reference, status, created_at, completed_at, casino_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         payoutId,
-        influencer.id,
+        affiliate.id,
         withdrawal.amount,
         "PIX",
         withdrawal.pix_key,

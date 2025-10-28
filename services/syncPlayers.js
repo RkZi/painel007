@@ -30,9 +30,9 @@ export async function syncPlayers(casino, panelConn) {
 
     for (const user of users) {
       try {
-        let influencerId = null;
+        let affiliateId = null;
 
-        // Resolver influencer pelo inviter -> inviter_code
+        // Resolver affiliate pelo inviter -> inviter_code
         if (user.inviter) {
           const [inviterRows] = await casinoConn.execute(
             "SELECT inviter_code FROM users WHERE id = ?",
@@ -40,13 +40,13 @@ export async function syncPlayers(casino, panelConn) {
           );
           if (inviterRows.length > 0) {
             const inviterCode = inviterRows[0].inviter_code;
-            const [influencerRows] = await panelConn.execute(
-              "SELECT id FROM influencers WHERE code = ? AND casino_id = ?",
+            const [affiliateRows] = await panelConn.execute(
+              "SELECT id FROM affiliates WHERE code = ? AND casino_id = ?",
               [inviterCode, casino.id]
             );
-            if (influencerRows.length > 0) {
-              influencerId = influencerRows[0].id;
-              logInfo(`[${casino.name}] [syncPlayers] Influencer resolvido para user ${user.id}: ${influencerId}`);
+            if (affiliateRows.length > 0) {
+              affiliateId = affiliateRows[0].id;
+              logInfo(`[${casino.name}] [syncPlayers] Affiliate resolvido para user ${user.id}: ${affiliateId}`);
             }
           }
         }
@@ -61,14 +61,14 @@ export async function syncPlayers(casino, panelConn) {
           const playerId = uuidv4();
           await panelConn.execute(
             `INSERT INTO players_sync 
-              (id, name, email, inviter_code, influencer_id, casino_id, casino_user_id)
+              (id, name, email, inviter_code, affiliate_id, casino_id, casino_user_id)
              VALUES (?, ?, ?, ?, ?, ?, ?)`,
             [
               playerId,
               user.name,
               user.email,
               user.inviter_code,
-              influencerId,
+              affiliateId,
               casino.id,
               user.id,
             ]

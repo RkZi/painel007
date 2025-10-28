@@ -9,7 +9,7 @@ export async function syncComns(casino, panelConn) {
 
   try {
     const [deposits] = await panelConn.execute(
-      `SELECT d.id, d.influencer_id, d.amount, d.is_first, d.casino_deposit_id
+      `SELECT d.id, d.affiliate_id, d.amount, d.is_first, d.casino_deposit_id
        FROM deposits_sync d
        LEFT JOIN commissions c ON c.deposit_id = d.id
        WHERE d.casino_id = ? AND c.id IS NULL`,
@@ -19,15 +19,15 @@ export async function syncComns(casino, panelConn) {
 
     for (const dep of deposits) {
       try {
-        // Buscar contrato do influencer
+        // Buscar contrato do affiliate
         const [contracts] = await panelConn.execute(
           `SELECT base_commission_percent, contract_type
            FROM affiliate_contracts
-           WHERE influencer_id = ? AND casino_id = ? AND active = 1`,
-          [dep.influencer_id, casino.id]
+           WHERE affiliate_id = ? AND casino_id = ? AND active = 1`,
+          [dep.affiliate_id, casino.id]
         );
         if (contracts.length === 0) {
-          logError(`[${casino.name}] [syncComns] Nenhum contrato encontrado para influencer ${dep.influencer_id}`);
+          logError(`[${casino.name}] [syncComns] Nenhum contrato encontrado para affiliate ${dep.affiliate_id}`);
           continue;
         }
         const contract = contracts[0];
@@ -41,12 +41,12 @@ export async function syncComns(casino, panelConn) {
 
         await panelConn.execute(
           `INSERT INTO commissions
-            (id, deposit_id, influencer_id, commission_amount, status, casino_id, casino_deposit_id)
+            (id, deposit_id, affiliate_id, commission_amount, status, casino_id, casino_deposit_id)
            VALUES (?, ?, ?, ?, 'pending', ?, ?)`,
           [
             commissionId,
             dep.id,
-            dep.influencer_id,
+            dep.affiliate_id,
             commissionAmount,
             casino.id,
             dep.casino_deposit_id,

@@ -26,16 +26,16 @@ export async function runWalletWorker() {
   try {
     conn = await connectPanelDB();
 
-    // Buscar todos influencers
-    const [influencers] = await conn.execute(`SELECT id FROM influencers`);
-    logInfo(`[WALLET] Encontrados ${influencers.length} influencers para processar.`);
+    // Buscar todos affiliates
+    const [affiliates] = await conn.execute(`SELECT id FROM affiliates`);
+    logInfo(`[WALLET] Encontrados ${affiliates.length} affiliates para processar.`);
 
-    for (const inf of influencers) {
+    for (const inf of affiliates) {
       // Total ganho: todas comissões disponíveis
       const [earnedRows] = await conn.execute(
         `SELECT COALESCE(SUM(commission_amount), 0) AS total_earned
          FROM commissions
-         WHERE influencer_id = ? AND status = 'available'`,
+         WHERE affiliate_id = ? AND status = 'available'`,
         [inf.id]
       );
       const totalEarned = parseFloat(earnedRows[0].total_earned);
@@ -44,7 +44,7 @@ export async function runWalletWorker() {
       const [withdrawnRows] = await conn.execute(
         `SELECT COALESCE(SUM(total_amount), 0) AS total_withdrawn
          FROM payouts
-         WHERE influencer_id = ? AND status = 'approved'`,
+         WHERE affiliate_id = ? AND status = 'approved'`,
         [inf.id]
       );
       const totalWithdrawn = parseFloat(withdrawnRows[0].total_withdrawn);
@@ -52,12 +52,12 @@ export async function runWalletWorker() {
       const currentBalance = totalEarned - totalWithdrawn;
 
       logInfo(
-        `[WALLET] Influencer ${inf.id} -> Ganhou: ${totalEarned}, Sacou: ${totalWithdrawn}, Saldo: ${currentBalance}`
+        `[WALLET] Affiliate ${inf.id} -> Ganhou: ${totalEarned}, Sacou: ${totalWithdrawn}, Saldo: ${currentBalance}`
       );
 
       // Upsert no wallet_balances
       await conn.execute(
-        `INSERT INTO wallet_balances (influencer_id, total_earned, total_withdrawn, current_balance)
+        `INSERT INTO wallet_balances (affiliate_id, total_earned, total_withdrawn, current_balance)
          VALUES (?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
            total_earned = VALUES(total_earned),

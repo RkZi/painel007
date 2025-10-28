@@ -45,7 +45,7 @@ export async function syncDeposits(casino, panelConn) {
 
         // Localizar player
         const [playerRows] = await panelConn.execute(
-          `SELECT id, influencer_id, total_deposits 
+          `SELECT id, affiliate_id, total_deposits 
            FROM players_sync WHERE casino_id = ? AND casino_user_id = ?`,
           [casino.id, dep.casino_user_id]
         );
@@ -59,12 +59,12 @@ export async function syncDeposits(casino, panelConn) {
         const depositId = uuidv4();
         await panelConn.execute(
           `INSERT INTO deposits_sync
-            (id, player_id, influencer_id, amount, currency, is_first, deposited_at, casino_id, casino_deposit_id)
+            (id, player_id, affiliate_id, amount, currency, is_first, deposited_at, casino_id, casino_deposit_id)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             depositId,
             player.id,
-            player.influencer_id,
+            player.affiliate_id,
             dep.amount,
             dep.currency || "BRL",
             isFirst,

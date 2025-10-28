@@ -39,34 +39,34 @@ async function connectPanelDB() {
  * Rota do Worker: Criação de afiliação em novo cassino
  */
 router.post("/worker/affiliate-request", async (req, res) => {
-  const { influencer_id, casino } = req.body;
+  const { affiliate_id, casino } = req.body;
 
-  if (!influencer_id || !casino) {
+  if (!affiliate_id || !casino) {
     return res.status(400).json({
       status: "error",
-      message: "Payload inválido. É necessário enviar influencer_id e casino",
+      message: "Payload inválido. É necessário enviar affiliate_id e casino",
     });
   }
 
   let panelConn, casinoConn;
   try {
-    logInfo(`[AFFILIATE] Iniciando processo de afiliação para influencer ${influencer_id} no cassino ${casino.name}`);
+    logInfo(`[AFFILIATE] Iniciando processo de afiliação para affiliate ${affiliate_id} no cassino ${casino.name}`);
 
     panelConn = await connectPanelDB();
 
-    // 1. Buscar dados do influencer no painel
+    // 1. Buscar dados do affiliate no painel
     const [infRows] = await panelConn.execute(
-      "SELECT id, name, email, phone, document, code FROM influencers WHERE id = ?",
-      [influencer_id]
+      "SELECT id, name, email, phone, document, code FROM affiliates WHERE id = ?",
+      [affiliate_id]
     );
 
     if (!infRows.length) {
-      logError("[AFFILIATE] Influencer não encontrado", influencer_id);
-      return res.status(404).json({ status: "error", message: "Influencer não encontrado" });
+      logError("[AFFILIATE] Affiliate não encontrado", affiliate_id);
+      return res.status(404).json({ status: "error", message: "Affiliate não encontrado" });
     }
 
-    const influencer = infRows[0];
-    logInfo("[AFFILIATE] Influencer encontrado", influencer.email);
+    const affiliate = infRows[0];
+    logInfo("[AFFILIATE] Affiliate encontrado", affiliate.email);
 
     // 2. Conectar ao banco do cassino alvo
     casinoConn = await connectCasinoDB(casino);
@@ -83,10 +83,10 @@ router.post("/worker/affiliate-request", async (req, res) => {
         (name, email, password, inviter_code, role_id, logged_in, banned, language, created_at, updated_at) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
-        influencer.name,
-        influencer.email,
+        affiliate.name,
+        affiliate.email,
         hashedPassword,
-        influencer.code, // já cria com o código de afiliação existente
+        affiliate.code, // já cria com o código de afiliação existente
         2, // role padrão (2 = afiliado/jogador, depende do sistema)
         0, // logged_in
         0, // banned

@@ -51,11 +51,11 @@ async function logAudit(conn, action, details, userId = null, casinoId = null) {
 }
 
 // Busca 1 contrato aplicável para o depósito (prioriza o mais recente)
-async function pickApplicableContract(conn, influencerId, casinoId, depositedAt) {
+async function pickApplicableContract(conn, affiliateId, casinoId, depositedAt) {
   const [rows] = await conn.execute(
-    `SELECT id, influencer_id, base_commission_percent, contract_type, start_date, end_date, active, casino_id
+    `SELECT id, affiliate_id, base_commission_percent, contract_type, start_date, end_date, active, casino_id
      FROM affiliate_contracts
-     WHERE influencer_id = ?
+     WHERE affiliate_id = ?
        AND active = 1
        AND (casino_id IS NULL OR casino_id = ?)
        AND (start_date IS NULL OR ? >= start_date)
@@ -65,7 +65,7 @@ async function pickApplicableContract(conn, influencerId, casinoId, depositedAt)
        start_date DESC,            -- mais recente primeiro
        base_commission_percent DESC
      LIMIT 1`,
-    [influencerId, casinoId, depositedAt, depositedAt]
+    [affiliateId, casinoId, depositedAt, depositedAt]
   );
   return rows[0] || null;
 }
@@ -74,33 +74,33 @@ async function pickApplicableContract(conn, influencerId, casinoId, depositedAt)
 // Etapas de auditoria
 // ============================
 
-async function fixPlayersInfluencerLink(conn) {
-  // Preenche players_sync.influencer_id via inviter_code -> influencers.code
+async function fixPlayersAffiliateLink(conn) {
+  // Preenche players_sync.affiliate_id via inviter_code -> affiliates.code
   const [result] = await conn.execute(
     `UPDATE players_sync p
-     JOIN influencers i ON i.code = p.inviter_code
-     SET p.influencer_id = i.id
-     WHERE p.influencer_id IS NULL AND p.inviter_code IS NOT NULL`
+     JOIN affiliates i ON i.code = p.inviter_code
+     SET p.affiliate_id = i.id
+     WHERE p.affiliate_id IS NULL AND p.inviter_code IS NOT NULL`
   );
   if (result.affectedRows > 0) {
-    logInfo(`[AUDIT] players_sync vinculados ao influencer: ${result.affectedRows}`);
-    await logAudit(conn, "AUDIT_FIX_PLAYER_INFLUENCER", { affected: result.affectedRows });
+    logInfo(`[AUDIT] players_sync vinculados ao affiliate: ${result.affectedRows}`);
+    await logAudit(conn, "AUDIT_FIX_PLAYER_AFFILIATE", { affected: result.affectedRows });
   }
   return result.affectedRows || 0;
 }
 
-async function fixDepositsMissingInfluencer(conn) {
-  // Tenta puxar influencer a partir do player
+async function fixDepositsMissingAffiliate(conn) {
+  // Tenta puxar affiliate a partir do player
   const [result] = await conn.execute(
     `UPDATE deposits_sync d
      JOIN players_sync p ON p.id = d.player_id
-     SET d.influencer_id = p.influencer_id
-     WHERE d.influencer_id IS NULL
-       AND p.influencer_id IS NOT NULL`
+     SET d.affiliate_id = p.affiliate_id
+     WHERE d.affiliate_id IS NULL
+       AND p.affiliate_id IS NOT NULL`
   );
   if (result.affectedRows > 0) {
-    logInfo(`[AUDIT] deposits_sync com influencer_id corrigido: ${result.affectedRows}`);
-    await logAudit(conn, "AUDIT_FIX_DEPOSIT_INFLUENCER", { affected: result.affectedRows });
+    logInfo(`[AUDIT] deposits_sync com affiliate_id corrigido: ${result.affectedRows}`);
+    await logAudit(conn, "AUDIT_FIX_DEPOSIT_AFFILIATE", { affected: result.affectedRows });
   }
   return result.affectedRows || 0;
 }
@@ -126,20 +126,20 @@ async function normalizeFirstDepositFlag(conn) {
 async function createMissingCommissions(conn) {
   // Seleciona depósitos sem comissão gerada
   const [deposits] = await conn.execute(
-    `SELECT d.id, d.player_id, d.influencer_id, d.amount, d.deposited_at, d.is_first, d.casino_id, d.casino_deposit_id
+    `SELECT d.id, d.player_id, d.affiliate_id, d.amount, d.deposited_at, d.is_first, d.casino_id, d.casino_deposit_id
      FROM deposits_sync d
      LEFT JOIN commissions c ON c.deposit_id = d.id
      WHERE c.id IS NULL
-       AND d.influencer_id IS NOT NULL
+       AND d.affiliate_id IS NOT NULL
        AND d.casino_deposit_id IS NOT NULL`
   );
 
   let created = 0;
   for (const d of deposits) {
     try {
-      const contract = await pickApplicableContract(conn, d.influencer_id, d.casino_id, d.deposited_at);
+      const contract = await pickApplicableContract(conn, d.affiliate_id, d.casino_id, d.deposited_at);
       if (!contract) {
-        logInfo("[AUDIT] Sem contrato aplicável para depósito", { deposit: d.id, influencer: d.influencer_id });
+        logInfo("[AUDIT] Sem contrato aplicável para depósito", { deposit: d.id, affiliate: d.affiliate_id });
         continue;
       }
       if (contract.contract_type === "first_deposit" && Number(d.is_first) !== 1) {
@@ -153,9 +153,9 @@ async function createMissingCommissions(conn) {
       const commissionId = uuidv4();
       await conn.execute(
         `INSERT INTO commissions
-           (id, deposit_id, influencer_id, commission_amount, status, created_at, updated_at, casino_id, casino_deposit_id)
+           (id, deposit_id, affiliate_id, commission_amount, status, created_at, updated_at, casino_id, casino_deposit_id)
          VALUES (?, ?, ?, ?, 'available', NOW(), NOW(), ?, ?)`,
-        [commissionId, d.id, d.influencer_id, commissionAmount, d.casino_id, d.casino_deposit_id]
+        [commissionId, d.id, d.affiliate_id, commissionAmount, d.casino_id, d.casino_deposit_id]
       );
       created++;
       logInfo("[AUDIT] Comissão criada", {
@@ -168,7 +168,7 @@ async function createMissingCommissions(conn) {
         conn,
         "AUDIT_CREATE_COMMISSION",
         { commission_id: commissionId, deposit_id: d.id, amount: commissionAmount, percent },
-        d.influencer_id,
+        d.affiliate_id,
         d.casino_id
       );
     } catch (e) {
@@ -183,16 +183,16 @@ async function createMissingCommissions(conn) {
 async function fixDivergentCommissions(conn) {
   // Recalcula e ajusta comissões já existentes se divergirem do contrato
   const [rows] = await conn.execute(
-    `SELECT c.id AS commission_id, c.commission_amount, c.status, c.influencer_id, c.casino_id,
+    `SELECT c.id AS commission_id, c.commission_amount, c.status, c.affiliate_id, c.casino_id,
             d.id AS deposit_id, d.amount AS deposit_amount, d.deposited_at, d.is_first
      FROM commissions c
      JOIN deposits_sync d ON d.id = c.deposit_id
-     WHERE c.influencer_id IS NOT NULL`
+     WHERE c.affiliate_id IS NOT NULL`
   );
 
   let updated = 0;
   for (const row of rows) {
-    const contract = await pickApplicableContract(conn, row.influencer_id, row.casino_id, row.deposited_at);
+    const contract = await pickApplicableContract(conn, row.affiliate_id, row.casino_id, row.deposited_at);
     if (!contract) continue;
 
     if (contract.contract_type === "first_deposit" && Number(row.is_first) !== 1) {
@@ -218,7 +218,7 @@ async function fixDivergentCommissions(conn) {
         conn,
         "AUDIT_FIX_COMMISSION_AMOUNT",
         { commission_id: row.commission_id, from: row.commission_amount, to: expected },
-        row.influencer_id,
+        row.affiliate_id,
         row.casino_id
       );
     }
@@ -308,12 +308,12 @@ async function refreshWalletBalances(conn) {
   // total_withdrawn = SUM(payouts WHERE status='approved')  (conforme orientação)
   // current_balance = total_earned - total_withdrawn
   const [rows] = await conn.execute(
-    `SELECT i.id AS influencer_id,
+    `SELECT i.id AS affiliate_id,
             COALESCE(SUM(CASE WHEN c.status='available' THEN c.commission_amount ELSE 0 END),0) AS total_earned,
             COALESCE(SUM(CASE WHEN p.status='approved' THEN p.total_amount ELSE 0 END),0) AS total_withdrawn
-     FROM influencers i
-     LEFT JOIN commissions c ON c.influencer_id = i.id
-     LEFT JOIN payouts p ON p.influencer_id = i.id
+     FROM affiliates i
+     LEFT JOIN commissions c ON c.affiliate_id = i.id
+     LEFT JOIN payouts p ON p.affiliate_id = i.id
      GROUP BY i.id`
   );
 
@@ -324,14 +324,14 @@ async function refreshWalletBalances(conn) {
     if (current < 0) negatives++;
 
     await conn.execute(
-      `INSERT INTO wallet_balances (influencer_id, total_earned, total_withdrawn, current_balance, updated_at)
+      `INSERT INTO wallet_balances (affiliate_id, total_earned, total_withdrawn, current_balance, updated_at)
        VALUES (?, ?, ?, ?, NOW())
        ON DUPLICATE KEY UPDATE
          total_earned = VALUES(total_earned),
          total_withdrawn = VALUES(total_withdrawn),
          current_balance = VALUES(current_balance),
          updated_at = NOW()`,
-      [r.influencer_id, r.total_earned, r.total_withdrawn, current]
+      [r.affiliate_id, r.total_earned, r.total_withdrawn, current]
     );
     upserts++;
   }
@@ -354,7 +354,7 @@ async function runAuditOnce() {
   const summary = {
     startedAt,
     fixedPlayerLinks: 0,
-    fixedDepositInfluencers: 0,
+    fixedDepositAffiliates: 0,
     normalizedFirst: 0,
     commissionsCreated: 0,
     commissionsAdjusted: 0,
@@ -365,8 +365,8 @@ async function runAuditOnce() {
 
   try {
     logInfo("[AUDIT] ================== Início do ciclo de auditoria ==================");
-    summary.fixedPlayerLinks = await fixPlayersInfluencerLink(conn);
-    summary.fixedDepositInfluencers = await fixDepositsMissingInfluencer(conn);
+    summary.fixedPlayerLinks = await fixPlayersAffiliateLink(conn);
+    summary.fixedDepositAffiliates = await fixDepositsMissingAffiliate(conn);
     summary.normalizedFirst = await normalizeFirstDepositFlag(conn);
     summary.commissionsCreated = await createMissingCommissions(conn);
     summary.commissionsAdjusted = await fixDivergentCommissions(conn);
